@@ -98,8 +98,9 @@ def test_can_detect_dtype_from_avro_type_nested(
     actual = cudf_from_avro_util(schema_root, [])
 
     col_name = "{ns}child.{ns}leaf.prop3".format(
-        ns="" if namespace is None else namespace + "."
+        ns="" if namespace is None else f'{namespace}.'
     )
+
 
     expected = cudf.DataFrame(
         {col_name: cudf.Series(None, None, expected_dtype)}

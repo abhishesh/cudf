@@ -195,10 +195,7 @@ def read_orc_statistics(
             for i, raw_file_stats in enumerate(raw_file_statistics)
             if columns is None or column_names[i] in columns
         }
-        if any(
-            not parsed_statistics
-            for parsed_statistics in file_statistics.values()
-        ):
+        if not all(file_statistics.values()):
             continue
         else:
             files_statistics.append(file_statistics)
@@ -209,12 +206,7 @@ def read_orc_statistics(
                 for i, raw_file_stats in enumerate(raw_stripe_statistics)
                 if columns is None or column_names[i] in columns
             }
-            if any(
-                not parsed_statistics
-                for parsed_statistics in stripe_statistics.values()
-            ):
-                continue
-            else:
+            if all(stripe_statistics.values()):
                 stripes_statistics.append(stripe_statistics)
 
     return files_statistics, stripes_statistics

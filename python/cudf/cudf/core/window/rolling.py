@@ -192,11 +192,10 @@ class Rolling(GetAttrGetItemMixin, Reducible):
             raise NotImplementedError("axis != 0 is not supported yet.")
         self.axis = axis
 
-        if win_type is not None:
-            if win_type != "boxcar":
-                raise NotImplementedError(
-                    "Only the default win_type 'boxcar' is currently supported"
-                )
+        if win_type is not None and win_type != "boxcar":
+            raise NotImplementedError(
+                "Only the default win_type 'boxcar' is currently supported"
+            )
         self.win_type = win_type
 
     def __getitem__(self, arg):
@@ -472,17 +471,9 @@ class RollingGroupby(Rolling):
     def _apply_agg(self, agg_name):
         if agg_name == "count" and not self._time_window:
             self.min_periods = 0
-        index = cudf.MultiIndex.from_frame(
-            cudf.DataFrame(
-                {
-                    key: value
-                    for key, value in itertools.chain(
+        index = cudf.MultiIndex.from_frame(cudf.DataFrame(dict(itertools.chain(
                         self._group_keys._data.items(),
                         self.obj.index._data.items(),
-                    )
-                }
-            )
-        )
+                    ))))
 
-        result = super()._apply_agg(agg_name).set_index(index)
-        return result
+        return super()._apply_agg(agg_name).set_index(index)

@@ -75,7 +75,7 @@ def _to_flat_dict(d):
     Convert the given nested dictionary to a flat dictionary
     with tuple keys.
     """
-    return {k: v for k, v in _to_flat_dict_inner(d)}
+    return dict(_to_flat_dict_inner(d))
 
 
 class ColumnAccessor(MutableMapping):
@@ -110,8 +110,6 @@ class ColumnAccessor(MutableMapping):
             multiindex = multiindex or data.multiindex
             level_names = level_names or data.level_names
             self._data = data._data
-            self.multiindex = multiindex
-            self._level_names = level_names
         else:
             # This code path is performance-critical for copies and should be
             # modified with care.
@@ -130,8 +128,9 @@ class ColumnAccessor(MutableMapping):
                         raise ValueError("All columns must be of equal length")
                     self._data[k] = v
 
-            self.multiindex = multiindex
-            self._level_names = level_names
+
+        self.multiindex = multiindex
+        self._level_names = level_names
 
     @classmethod
     def _create_unsafe(
@@ -186,23 +185,15 @@ class ColumnAccessor(MutableMapping):
     def nlevels(self) -> int:
         if len(self._data) == 0:
             return 0
-        if not self.multiindex:
-            return 1
-        else:
-            return len(next(iter(self.keys())))
+        return 1 if not self.multiindex else len(next(iter(self.keys())))
 
     @property
     def name(self) -> Any:
-        if len(self._data) == 0:
-            return None
-        return self.level_names[-1]
+        return None if len(self._data) == 0 else self.level_names[-1]
 
     @property
     def nrows(self) -> int:
-        if len(self._data) == 0:
-            return 0
-        else:
-            return len(next(iter(self.values())))
+        return 0 if len(self._data) == 0 else len(next(iter(self.values())))
 
     @cached_property
     def names(self) -> Tuple[Any, ...]:
@@ -244,18 +235,13 @@ class ColumnAccessor(MutableMapping):
 
     def to_pandas_index(self) -> pd.Index:
         """Convert the keys of the ColumnAccessor to a Pandas Index object."""
-        if self.multiindex and len(self.level_names) > 0:
-            # Using `from_frame()` instead of `from_tuples`
-            # prevents coercion of values to a different type
-            # (e.g., ''->NaT)
-            result = pd.MultiIndex.from_frame(
-                pd.DataFrame(
-                    self.names, columns=self.level_names, dtype="object"
-                ),
+        return (
+            pd.MultiIndex.from_frame(
+                pd.DataFrame(self.names, columns=self.level_names, dtype="object"),
             )
-        else:
-            result = pd.Index(self.names, name=self.name, tupleize_cols=False)
-        return result
+            if self.multiindex and len(self.level_names) > 0
+            else pd.Index(self.names, name=self.name, tupleize_cols=False)
+        )
 
     def insert(
         self, name: Any, value: Any, loc: int = -1, validate: bool = True
@@ -337,9 +323,8 @@ class ColumnAccessor(MutableMapping):
         elif pd.api.types.is_list_like(key) and not isinstance(key, tuple):
             return self._select_by_label_list_like(key)
         else:
-            if isinstance(key, tuple):
-                if any(isinstance(k, slice) for k in key):
-                    return self._select_by_label_with_wildcard(key)
+            if isinstance(key, tuple) and any(isinstance(k, slice) for k in key):
+                return self._select_by_label_with_wildcard(key)
             return self._select_by_label_grouped(key)
 
     def select_by_index(self, index: Any) -> ColumnAccessor:
@@ -405,16 +390,15 @@ class ColumnAccessor(MutableMapping):
         result = self._grouped_data[key]
         if isinstance(result, cudf.core.column.ColumnBase):
             return self.__class__({key: result})
-        else:
-            if self.multiindex:
-                result = _to_flat_dict(result)
-            if not isinstance(key, tuple):
-                key = (key,)
-            return self.__class__(
-                result,
-                multiindex=self.nlevels - len(key) > 1,
-                level_names=self.level_names[len(key) :],
-            )
+        if self.multiindex:
+            result = _to_flat_dict(result)
+        if not isinstance(key, tuple):
+            key = (key,)
+        return self.__class__(
+            result,
+            multiindex=self.nlevels - len(key) > 1,
+            level_names=self.level_names[len(key) :],
+        )
 
     def _select_by_label_slice(self, key: slice) -> ColumnAccessor:
         start, stop = key.start, key.stop

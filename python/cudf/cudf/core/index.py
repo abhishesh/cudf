@@ -264,7 +264,7 @@ class RangeIndex(BaseIndex):
             item, tuple(np.sctypes["int"] + np.sctypes["float"] + [int, float])
         ):
             return False
-        if not item % 1 == 0:
+        if item % 1 != 0:
             return False
         return item in range(self._start, self._stop, self._step)
 
@@ -342,25 +342,20 @@ class RangeIndex(BaseIndex):
         return as_index(self._values[index], name=self.name)
 
     def equals(self, other):
-        if isinstance(other, RangeIndex):
-            if (self._start, self._stop, self._step) == (
-                other._start,
-                other._stop,
-                other._step,
-            ):
-                return True
+        if isinstance(other, RangeIndex) and (
+            self._start,
+            self._stop,
+            self._step,
+        ) == (
+            other._start,
+            other._stop,
+            other._step,
+        ):
+            return True
         return Int64Index._from_data(self._data).equals(other)
 
     def serialize(self):
-        header = {}
-        header["index_column"] = {}
-
-        # store metadata values of index separately
-        # We don't need to store the GPU buffer for RangeIndexes
-        # cuDF only needs to store start/stop and rehydrate
-        # during de-serialization
-        header["index_column"]["start"] = self._start
-        header["index_column"]["stop"] = self._stop
+        header = {"index_column": {"start": self._start, "stop": self._stop}}
         header["index_column"]["step"] = self._step
         frames = []
 
@@ -480,8 +475,7 @@ class RangeIndex(BaseIndex):
             step = self._step
 
         stop = start + len(self) * step
-        pos = search_range(start, stop, label, step, side=side)
-        return pos
+        return search_range(start, stop, label, step, side=side)
 
     def memory_usage(self, deep=False):
         if deep:
@@ -768,10 +762,7 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
             data = data
         else:
             if isinstance(data, (list, tuple)):
-                if len(data) == 0:
-                    data = np.asarray([], dtype="int64")
-                else:
-                    data = np.asarray(data)
+                data = np.asarray([], dtype="int64") if len(data) == 0 else np.asarray(data)
             data = column.as_column(data)
             assert isinstance(data, (NumericalColumn, StringColumn))
 
@@ -784,9 +775,7 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
         if ret is not None:
             return ret
 
-        # Attempt to dispatch all other functions to cupy.
-        cupy_func = getattr(cupy, ufunc.__name__)
-        if cupy_func:
+        if cupy_func := getattr(cupy, ufunc.__name__):
             if ufunc.nin == 2:
                 other = inputs[self is inputs[0]]
                 inputs = self._make_operands_for_binop(other)
@@ -1008,15 +997,20 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
 
         if lower_bound == upper_bound:
             # Key not found, apply method
-            if method in ("pad", "ffill"):
+            if (
+                method not in ("pad", "ffill")
+                and method in ("backfill", "bfill")
+                and lower_bound == self._data.nrows
+                or method not in ("pad", "ffill", "backfill", "bfill", "nearest")
+            ):
+                raise KeyError(key)
+            elif method not in ("pad", "ffill") and method in ("backfill", "bfill"):
+                return lower_bound
+            elif method in ("pad", "ffill"):
                 if lower_bound == 0:
                     raise KeyError(key)
                 return lower_bound - 1
-            elif method in ("backfill", "bfill"):
-                if lower_bound == self._data.nrows:
-                    raise KeyError(key)
-                return lower_bound
-            elif method == "nearest":
+            else:
                 if lower_bound == self._data.nrows:
                     return lower_bound - 1
                 elif lower_bound == 0:
@@ -1028,9 +1022,6 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
                     if abs(lower_val - key) < abs(upper_val - key)
                     else lower_bound
                 )
-            else:
-                raise KeyError(key)
-
         if lower_bound + 1 == upper_bound:
             # Search result is unique, return int.
             return (
@@ -1052,12 +1043,9 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
 
     def __repr__(self):
         max_seq_items = get_option("max_seq_items") or len(self)
-        mr = 0
-        if 2 * max_seq_items < len(self):
-            mr = max_seq_items + 1
-
+        mr = max_seq_items + 1 if 2 * max_seq_items < len(self) else 0
         if len(self) > mr and mr != 0:
-            top = self[0:mr]
+            top = self[:mr]
             bottom = self[-1 * mr :]
 
             preprocess = cudf.concat([top, bottom])
@@ -1122,7 +1110,7 @@ class GenericIndex(SingleColumnFrame, BaseIndex):
         if "length" in tmp_meta:
             lines[-1] = lines[-1] + ", length=%d)" % len(self)
         else:
-            lines[-1] = lines[-1] + ")"
+            lines[-1] = f'{lines[-1]})'
 
         return "\n".join(lines)
 
@@ -2211,12 +2199,13 @@ class CategoricalIndex(GenericIndex):
         copy=False,
         name=None,
     ):
-        if isinstance(dtype, (pd.CategoricalDtype, cudf.CategoricalDtype)):
-            if categories is not None or ordered is not None:
-                raise ValueError(
-                    "Cannot specify `categories` or "
-                    "`ordered` together with `dtype`."
-                )
+        if isinstance(dtype, (pd.CategoricalDtype, cudf.CategoricalDtype)) and (
+            categories is not None or ordered is not None
+        ):
+            raise ValueError(
+                "Cannot specify `categories` or "
+                "`ordered` together with `dtype`."
+            )
         if copy:
             data = column.as_column(data, dtype=dtype).copy(deep=True)
         kwargs = _setdefault_name(data, name=name)
@@ -2372,7 +2361,7 @@ def interval_range(
             right_col = arange(
                 start.value, end.value, freq.value, dtype=common_dtype
             )
-    elif freq and not periods:
+    elif freq:
         if end is not None and start is not None:
             end = end - freq + 1
             left_col = arange(
@@ -2384,13 +2373,7 @@ def interval_range(
                 start.value, end.value, freq.value, dtype=common_dtype
             )
     elif start is not None and end is not None:
-        # if statements for mypy to pass
-        if freq:
-            left_col = arange(
-                start.value, end.value, freq.value, dtype=common_dtype
-            )
-        else:
-            left_col = arange(start.value, end.value, dtype=common_dtype)
+        left_col = arange(start.value, end.value, dtype=common_dtype)
         start = start + 1
         end = end + 1
         if freq:
@@ -2561,10 +2544,7 @@ class StringIndex(GenericIndex):
         Convert all na values(if any) in Index object
         to `<NA>` as a preprocessing step to `__repr__` methods.
         """
-        if self._values.has_nulls():
-            return self.fillna(cudf._NA_REP)
-        else:
-            return self
+        return self.fillna(cudf._NA_REP) if self._values.has_nulls() else self
 
     def is_boolean(self):
         return False

@@ -101,13 +101,12 @@ class Scalar:
     # todo: change to cached property
     @property
     def dtype(self):
-        if self._is_host_value_current:
-            if isinstance(self._host_value, str):
-                return cudf.dtype("object")
-            else:
-                return self._host_dtype
-        else:
+        if not self._is_host_value_current:
             return self.device_value.dtype
+        if isinstance(self._host_value, str):
+            return cudf.dtype("object")
+        else:
+            return self._host_dtype
 
     def is_valid(self):
         if not self._is_host_value_current:
@@ -123,11 +122,10 @@ class Scalar:
         if isinstance(value, list):
             if dtype is not None:
                 raise TypeError("Lists may not be cast to a different dtype")
-            else:
-                dtype = ListDtype.from_arrow(
-                    pa.infer_type([value], from_pandas=True)
-                )
-                return value, dtype
+            dtype = ListDtype.from_arrow(
+                pa.infer_type([value], from_pandas=True)
+            )
+            return value, dtype
         elif isinstance(dtype, ListDtype):
             if value not in {None, NA}:
                 raise ValueError(f"Can not coerce {value} to ListDtype")
@@ -157,18 +155,17 @@ class Scalar:
 
         if dtype is None:
             if not valid:
-                if isinstance(value, (np.datetime64, np.timedelta64)):
-                    unit, _ = np.datetime_data(value)
-                    if unit == "generic":
-                        raise TypeError(
-                            "Cant convert generic NaT to null scalar"
-                        )
-                    else:
-                        dtype = value.dtype
-                else:
+                if not isinstance(value, (np.datetime64, np.timedelta64)):
                     raise TypeError(
                         "dtype required when constructing a null scalar"
                     )
+                unit, _ = np.datetime_data(value)
+                if unit == "generic":
+                    raise TypeError(
+                        "Cant convert generic NaT to null scalar"
+                    )
+                else:
+                    dtype = value.dtype
             else:
                 dtype = value.dtype
 
@@ -187,11 +184,11 @@ class Scalar:
         """
         if self._is_host_value_current and self._is_device_value_current:
             return
-        elif self._is_host_value_current and not self._is_device_value_current:
+        elif self._is_host_value_current:
             self._device_value = cudf._lib.scalar.DeviceScalar(
                 self._host_value, self._host_dtype
             )
-        elif self._is_device_value_current and not self._is_host_value_current:
+        elif self._is_device_value_current:
             self._host_value = self._device_value.value
             self._host_dtype = self._host_value.dtype
         else:
@@ -319,14 +316,13 @@ class Scalar:
                 "m",
             }:
                 return other.dtype
-            else:
-                if (
+            if (
                     op == "__sub__"
                     and self.dtype.char == other.dtype.char == "M"
                 ):
-                    res, _ = np.datetime_data(max(self.dtype, other.dtype))
-                    return cudf.dtype("m8" + f"[{res}]")
-                return np.result_type(self.dtype, other.dtype)
+                res, _ = np.datetime_data(max(self.dtype, other.dtype))
+                return cudf.dtype(f"m8[{res}]")
+            return np.result_type(self.dtype, other.dtype)
 
         return cudf.dtype(out_dtype)
 
@@ -341,9 +337,8 @@ class Scalar:
         )
         if not valid:
             return Scalar(None, dtype=out_dtype)
-        else:
-            result = self._dispatch_scalar_binop(other, op)
-            return Scalar(result, dtype=out_dtype)
+        result = self._dispatch_scalar_binop(other, op)
+        return Scalar(result, dtype=out_dtype)
 
     def _dispatch_scalar_binop(self, other, op):
         if isinstance(other, Scalar):

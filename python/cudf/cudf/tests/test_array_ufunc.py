@@ -85,9 +85,11 @@ def test_ufunc_index(ufunc):
     except AssertionError:
         # TODO: This branch can be removed when
         # https://github.com/rapidsai/cudf/issues/10178 is resolved
-        if fname in ("power", "float_power"):
-            if (got - expect).abs().max() == 1:
-                pytest.xfail("https://github.com/rapidsai/cudf/issues/10178")
+        if (
+            fname in ("power", "float_power")
+            and (got - expect).abs().max() == 1
+        ):
+            pytest.xfail("https://github.com/rapidsai/cudf/issues/10178")
         raise
 
 
@@ -120,11 +122,10 @@ def test_binary_ufunc_index_array(ufunc, type_, reflect):
                 assert (cp.asnumpy(g) == e).all()
             else:
                 assert_eq(g, e, check_exact=False)
+    elif type_ == "cupy" and reflect:
+        assert (cp.asnumpy(got) == expect).all()
     else:
-        if type_ == "cupy" and reflect:
-            assert (cp.asnumpy(got) == expect).all()
-        else:
-            assert_eq(got, expect, check_exact=False)
+        assert_eq(got, expect, check_exact=False)
 
 
 @pytest.mark.parametrize("ufunc", _UFUNCS)

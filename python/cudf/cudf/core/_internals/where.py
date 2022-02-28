@@ -257,11 +257,11 @@ def where(
             # then re-index `cond`.
             if not frame.index.equals(cond.index):
                 cond = cond.reindex(frame.index)
+        elif cond.shape != frame.shape:
+            raise ValueError(
+                """Array conditional must be same shape as self"""
+            )
         else:
-            if cond.shape != frame.shape:
-                raise ValueError(
-                    """Array conditional must be same shape as self"""
-                )
             # Setting `frame` column names to `cond`
             # as `cond` has no column names.
             cond._set_column_names_like(frame)

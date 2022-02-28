@@ -191,9 +191,8 @@ class ListColumn(ColumnBase):
             super().set_base_data(value)
 
     def serialize(self):
-        header = {}
         frames = []
-        header["type-serialized"] = pickle.dumps(type(self))
+        header = {"type-serialized": pickle.dumps(type(self))}
         header["null_count"] = self.null_count
         header["size"] = self.size
         header["dtype"], dtype_frames = self.dtype.serialize()
@@ -219,11 +218,7 @@ class ListColumn(ColumnBase):
     def deserialize(cls, header, frames):
 
         # Get null mask
-        if header["null_count"] > 0:
-            mask = Buffer(frames[-1])
-        else:
-            mask = None
-
+        mask = Buffer(frames[-1]) if header["null_count"] > 0 else None
         # Deserialize dtype
         dtype = pickle.loads(header["dtype"]["type-serialized"]).deserialize(
             header["dtype"], frames[: header["dtype_frames_count"]]
@@ -293,17 +288,14 @@ class ListColumn(ColumnBase):
         for data in arbitrary:
             if cudf._lib.scalar._is_null_host_scalar(data):
                 mask_col.append(False)
-                offset_col.append(offset)
             else:
                 mask_col.append(True)
                 data_col = data_col.append(as_column(data))
                 offset += len(data)
-                offset_col.append(offset)
-
+            offset_col.append(offset)
         offset_col = column.as_column(offset_col, dtype="int32")
 
-        # Build ListColumn
-        res = cls(
+        return cls(
             size=len(arbitrary),
             dtype=cudf.ListDtype(data_col.dtype),
             mask=cudf._lib.transform.bools_to_mask(as_column(mask_col)),
@@ -311,7 +303,6 @@ class ListColumn(ColumnBase):
             null_count=0,
             children=(offset_col, data_col),
         )
-        return res
 
     def as_string_column(
         self, dtype: Dtype, format=None, **kwargs
@@ -513,7 +504,7 @@ class ListMethods(ColumnMethods):
         lists_indices_col = as_column(lists_indices)
         if not isinstance(lists_indices_col, ListColumn):
             raise ValueError("lists_indices should be list type array.")
-        if not lists_indices_col.size == self._column.size:
+        if lists_indices_col.size != self._column.size:
             raise ValueError(
                 "lists_indices and list column is of different " "size."
             )

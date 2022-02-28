@@ -198,11 +198,7 @@ class BaseIndex(Serializable):
         return 1
 
     def _set_names(self, names, inplace=False):
-        if inplace:
-            idx = self
-        else:
-            idx = self.copy(deep=False)
-
+        idx = self if inplace else self.copy(deep=False)
         idx.names = names
         if not inplace:
             return idx
@@ -447,14 +443,8 @@ class BaseIndex(Serializable):
             else:
                 return cudf.Index([], name=res_name)
 
-        if self.has_duplicates:
-            lhs = self.unique()
-        else:
-            lhs = self
-        if other.has_duplicates:
-            rhs = other.unique()
-        else:
-            rhs = other
+        lhs = self.unique() if self.has_duplicates else self
+        rhs = other.unique() if other.has_duplicates else other
         result = lhs._intersection(rhs, sort=sort)
         result.name = res_name
         return result
@@ -618,9 +608,11 @@ class BaseIndex(Serializable):
                         f"either one of them to same dtypes."
                     )
 
-                if isinstance(self._values, cudf.core.column.NumericalColumn):
-                    if self.dtype != other.dtype:
-                        this, other = numeric_normalize_types(self, other)
+                if (
+                    isinstance(self._values, cudf.core.column.NumericalColumn)
+                    and self.dtype != other.dtype
+                ):
+                    this, other = numeric_normalize_types(self, other)
                 to_concat = [this, other]
 
         for obj in to_concat:
@@ -1056,10 +1048,7 @@ class BaseIndex(Serializable):
         indices = self.argsort(ascending=ascending, na_position=na_position)
         index_sorted = self.take(indices)
 
-        if return_indexer:
-            return index_sorted, indices
-        else:
-            return index_sorted
+        return (index_sorted, indices) if return_indexer else index_sorted
 
     def unique(self):
         """
@@ -1145,7 +1134,6 @@ class BaseIndex(Serializable):
             if level is not None and isinstance(level, int):
                 on = lhs._data.select_by_index(level).names[0]
             right_names = (on,) if on is not None else right_names
-            on = right_names[0]
             if how == "outer":
                 how = "left"
             elif how == "right":
@@ -1153,14 +1141,11 @@ class BaseIndex(Serializable):
         else:
             # Both are normal indices
             right_names = left_names
-            on = right_names[0]
-
+        on = right_names[0]
         lhs.names = left_names
         rhs.names = right_names
 
-        output = lhs._merge(rhs, how=how, on=on, sort=sort)
-
-        return output
+        return lhs._merge(rhs, how=how, on=on, sort=sort)
 
     def rename(self, name, inplace=False):
         """
@@ -1304,11 +1289,7 @@ class BaseIndex(Serializable):
         if hasattr(cudf_index_module, fname):
             cudf_func = getattr(cudf_index_module, fname)
             # Handle case if cudf_func is same as numpy function
-            if cudf_func is func:
-                return NotImplemented
-            else:
-                return cudf_func(*args, **kwargs)
-
+            return NotImplemented if cudf_func is func else cudf_func(*args, **kwargs)
         else:
             return NotImplemented
 
@@ -1530,7 +1511,4 @@ class BaseIndex(Serializable):
 
 
 def _get_result_name(left_name, right_name):
-    if left_name == right_name:
-        return left_name
-    else:
-        return None
+    return left_name if left_name == right_name else None

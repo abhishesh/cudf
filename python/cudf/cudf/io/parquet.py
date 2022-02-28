@@ -36,11 +36,14 @@ def _write_parquet(
             ValueError("partition info is required for multiple paths")
         elif not is_list_like(partitions_info):
             ValueError("partition info must be list-like for multiple paths")
-        elif not len(paths) == len(partitions_info):
+        elif len(paths) != len(partitions_info):
             ValueError("partitions_info and paths must be of same size")
-    if is_list_like(partitions_info) and len(partitions_info) > 1:
-        if not is_list_like(paths):
-            ValueError("paths must be list-like when partitions_info provided")
+    if (
+        is_list_like(partitions_info)
+        and len(partitions_info) > 1
+        and not is_list_like(paths)
+    ):
+        ValueError("paths must be list-like when partitions_info provided")
 
     paths_or_bufs = [
         ioutils.get_writer_filepath_or_buffer(path, mode="wb", **kwargs)
@@ -56,7 +59,7 @@ def _write_parquet(
         "row_group_size_rows": row_group_size_rows,
         "partitions_info": partitions_info,
     }
-    if all([ioutils.is_fsspec_open_file(buf) for buf in paths_or_bufs]):
+    if all(ioutils.is_fsspec_open_file(buf) for buf in paths_or_bufs):
         with ExitStack() as stack:
             fsspec_objs = [stack.enter_context(file) for file in paths_or_bufs]
             file_objs = [
@@ -145,7 +148,7 @@ def write_to_dataset(
 
         if return_metadata:
             kwargs["metadata_file_path"] = metadata_file_paths
-        metadata = to_parquet(
+        return to_parquet(
             grouped_df,
             full_paths,
             index=preserve_index,
@@ -158,9 +161,7 @@ def write_to_dataset(
         full_path = fs.sep.join([root_path, filename])
         if return_metadata:
             kwargs["metadata_file_path"] = filename
-        metadata = df.to_parquet(full_path, index=preserve_index, **kwargs)
-
-    return metadata
+        return df.to_parquet(full_path, index=preserve_index, **kwargs)
 
 
 @ioutils.doc_read_parquet_metadata()
@@ -257,7 +258,7 @@ def _process_dataset(
             raise ValueError(
                 "Cannot specify a row_group selection for a directory path."
             )
-        row_groups_map = {path: rgs for path, rgs in zip(paths, row_groups)}
+        row_groups_map = dict(zip(paths, row_groups))
 
     # Apply filters and discover partition columns
     partition_keys = []
@@ -275,14 +276,12 @@ def _process_dataset(
                     file_fragment.partition_expression
                 )
                 partition_keys.append(
-                    [
-                        (name, raw_keys[name])
-                        for name in partition_categories.keys()
-                    ]
+                    [(name, raw_keys[name]) for name in partition_categories]
                 )
 
+
             # Apply row-group filtering
-            selection = row_groups_map.get(path, None)
+            selection = row_groups_map.get(path)
             if selection is not None or filters is not None:
                 filtered_row_groups = [
                     rg_info.id
@@ -356,9 +355,8 @@ def read_parquet(
             row_groups = [row_groups]
 
     # Check columns input
-    if columns is not None:
-        if not is_list_like(columns):
-            raise ValueError("Expected list like for columns")
+    if columns is not None and not is_list_like(columns):
+        raise ValueError("Expected list like for columns")
 
     # Start by trying construct a filesystem object, so we
     # can apply filters on remote file-systems
@@ -385,14 +383,14 @@ def read_parquet(
         )
     elif filters is not None:
         raise ValueError("cudf cannot apply filters to open file objects.")
-    filepath_or_buffer = paths if paths else filepath_or_buffer
+    filepath_or_buffer = paths or filepath_or_buffer
 
     filepaths_or_buffers = []
     if use_python_file_object:
         open_file_options = _default_open_file_options(
             open_file_options, columns, row_groups, fs=fs,
         )
-    for i, source in enumerate(filepath_or_buffer):
+    for source in filepath_or_buffer:
         tmp_source, compression = ioutils.get_filepath_or_buffer(
             path_or_data=source,
             compression=None,
@@ -566,12 +564,13 @@ def to_parquet(
     if engine == "cudf":
         # Ensure that no columns dtype is 'category'
         for col in df._column_names:
-            if partition_cols is None or col not in partition_cols:
-                if df[col].dtype.name == "category":
-                    raise ValueError(
-                        "'category' column dtypes are currently not "
-                        + "supported by the gpu accelerated parquet writer"
-                    )
+            if (partition_cols is None or col not in partition_cols) and df[
+                col
+            ].dtype.name == "category":
+                raise ValueError(
+                    "'category' column dtypes are currently not "
+                    + "supported by the gpu accelerated parquet writer"
+                )
 
         if partition_cols:
             if metadata_file_path is not None:
@@ -652,7 +651,7 @@ def merge_parquet_filemetadata(filemetadata_list):
 
 
 def _generate_filename():
-    return uuid4().hex + ".parquet"
+    return f'{uuid4().hex}.parquet'
 
 
 @annotate("_GET_PARTITIONED", color="green", domain="cudf_python")

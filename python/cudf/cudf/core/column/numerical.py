@@ -195,10 +195,11 @@ class NumericalColumn(NumericalBaseColumn):
                 )
                 return lhs.binary_operator(binop, rhs)
             out_dtype = np.result_type(self.dtype, rhs.dtype)
-            if binop in ["mod", "floordiv"]:
+            if binop in {"mod", "floordiv"}:
                 tmp = self if reflect else rhs
-                if (tmp.dtype in int_dtypes) and (
-                    (np.isscalar(tmp) and (0 == tmp))
+                if tmp.dtype in int_dtypes and (
+                    np.isscalar(tmp)
+                    and tmp == 0
                     or ((isinstance(tmp, NumericalColumn)) and (0.0 in tmp))
                 ):
                     out_dtype = cudf.dtype("float64")
@@ -239,26 +240,24 @@ class NumericalColumn(NumericalBaseColumn):
         elif isinstance(other, np.ndarray) and other.ndim == 0:
             other = other.item()
         other_dtype = np.min_scalar_type(other)
-        if other_dtype.kind in {"b", "i", "u", "f"}:
-            if isinstance(other, cudf.Scalar):
-                return other
-            other_dtype = np.promote_types(self.dtype, other_dtype)
-            if other_dtype == np.dtype("float16"):
-                other_dtype = cudf.dtype("float32")
-                other = other_dtype.type(other)
-            if self.dtype.kind == "b":
-                other_dtype = min_signed_type(other)
-            if np.isscalar(other):
-                return cudf.dtype(other_dtype).type(other)
-            else:
-                ary = utils.scalar_broadcast_to(
-                    other, size=len(self), dtype=other_dtype
-                )
-                return column.build_column(
-                    data=Buffer(ary), dtype=ary.dtype, mask=self.mask,
-                )
-        else:
+        if other_dtype.kind not in {"b", "i", "u", "f"}:
             raise TypeError(f"cannot broadcast {type(other)}")
+        if isinstance(other, cudf.Scalar):
+            return other
+        other_dtype = np.promote_types(self.dtype, other_dtype)
+        if other_dtype == np.dtype("float16"):
+            other_dtype = cudf.dtype("float32")
+            other = other_dtype.type(other)
+        if self.dtype.kind == "b":
+            other_dtype = min_signed_type(other)
+        if np.isscalar(other):
+            return cudf.dtype(other_dtype).type(other)
+        ary = utils.scalar_broadcast_to(
+            other, size=len(self), dtype=other_dtype
+        )
+        return column.build_column(
+            data=Buffer(ary), dtype=ary.dtype, mask=self.mask,
+        )
 
     def int2ip(self) -> "cudf.core.column.StringColumn":
         if self.dtype != cudf.dtype("int64"):
@@ -516,9 +515,7 @@ class NumericalColumn(NumericalBaseColumn):
         value = to_cudf_compatible_scalar(value)
         if not is_number(value):
             raise ValueError("Expected a numeric value")
-        found = 0
-        if len(self):
-            found = find(self.data_array_view, value, mask=self.mask,)
+        found = find(self.data_array_view, value, mask=self.mask,) if len(self) else 0
         if found == -1:
             if self.is_monotonic_increasing and closest:
                 found = find(
@@ -569,37 +566,35 @@ class NumericalColumn(NumericalBaseColumn):
         if self.dtype.kind == to_dtype.kind:
             if self.dtype <= to_dtype:
                 return True
+            # Kinds are the same but to_dtype is smaller
+            if "float" in to_dtype.name:
+                finfo = np.finfo(to_dtype)
+                lower_, upper_ = finfo.min, finfo.max
+            elif "int" in to_dtype.name:
+                iinfo = np.iinfo(to_dtype)
+                lower_, upper_ = iinfo.min, iinfo.max
+
+            if self.dtype.kind == "f":
+                # Exclude 'np.inf', '-np.inf'
+                s = cudf.Series(self)
+                # TODO: replace np.inf with cudf scalar when
+                # https://github.com/rapidsai/cudf/pull/6297 merges
+                non_infs = s[
+                    ((s == np.inf) | (s == -np.inf)).logical_not()
+                ]
+                col = non_infs._column
             else:
-                # Kinds are the same but to_dtype is smaller
-                if "float" in to_dtype.name:
-                    finfo = np.finfo(to_dtype)
-                    lower_, upper_ = finfo.min, finfo.max
-                elif "int" in to_dtype.name:
-                    iinfo = np.iinfo(to_dtype)
-                    lower_, upper_ = iinfo.min, iinfo.max
+                col = self
 
-                if self.dtype.kind == "f":
-                    # Exclude 'np.inf', '-np.inf'
-                    s = cudf.Series(self)
-                    # TODO: replace np.inf with cudf scalar when
-                    # https://github.com/rapidsai/cudf/pull/6297 merges
-                    non_infs = s[
-                        ((s == np.inf) | (s == -np.inf)).logical_not()
-                    ]
-                    col = non_infs._column
-                else:
-                    col = self
+            min_ = col.min()
+            # TODO: depending on implementation of cudf scalar and future
+            # refactor of min/max, change the test method
+            if np.isnan(min_):
+                # Column contains only infs
+                return True
 
-                min_ = col.min()
-                # TODO: depending on implementation of cudf scalar and future
-                # refactor of min/max, change the test method
-                if np.isnan(min_):
-                    # Column contains only infs
-                    return True
+            return (min_ >= lower_) and (col.max() < upper_)
 
-                return (min_ >= lower_) and (col.max() < upper_)
-
-        # want to cast int to uint
         elif self.dtype.kind == "i" and to_dtype.kind == "u":
             i_max_ = np.iinfo(self.dtype).max
             u_max_ = np.iinfo(to_dtype).max
@@ -608,14 +603,12 @@ class NumericalColumn(NumericalBaseColumn):
                 (i_max_ <= u_max_) or (self.max() < u_max_)
             )
 
-        # want to cast uint to int
         elif self.dtype.kind == "u" and to_dtype.kind == "i":
             u_max_ = np.iinfo(self.dtype).max
             i_max_ = np.iinfo(to_dtype).max
 
             return (u_max_ <= i_max_) or (self.max() < i_max_)
 
-        # want to cast int to float
         elif self.dtype.kind in {"i", "u"} and to_dtype.kind == "f":
             info = np.finfo(to_dtype)
             biggest_exact_int = 2 ** (info.nmant + 1)
@@ -623,26 +616,21 @@ class NumericalColumn(NumericalBaseColumn):
                 self.max() <= biggest_exact_int
             ):
                 return True
-            else:
+            filled = self.fillna(0)
+            return (
+                cudf.Series(filled).astype(to_dtype).astype(filled.dtype)
+                == cudf.Series(filled)
+            ).all()
 
-                filled = self.fillna(0)
-                return (
-                    cudf.Series(filled).astype(to_dtype).astype(filled.dtype)
-                    == cudf.Series(filled)
-                ).all()
-
-        # want to cast float to int:
         elif self.dtype.kind == "f" and to_dtype.kind in {"i", "u"}:
             iinfo = np.iinfo(to_dtype)
             min_, max_ = iinfo.min, iinfo.max
 
-            # best we can do is hope to catch it here and avoid compare
-            if (self.min() >= min_) and (self.max() <= max_):
-                filled = self.fillna(0, fill_nan=False)
-                return (cudf.Series(filled) % 1 == 0).all()
-            else:
+            if self.min() < min_ or self.max() > max_:
                 return False
 
+            filled = self.fillna(0, fill_nan=False)
+            return (cudf.Series(filled) % 1 == 0).all()
         return False
 
     def _with_type_metadata(self: ColumnBase, dtype: Dtype) -> ColumnBase:
@@ -756,7 +744,7 @@ def digitize(
     -------
     A column containing the indices
     """
-    if not column.dtype == bins.dtype:
+    if column.dtype != bins.dtype:
         raise ValueError(
             "Digitize() expects bins and input column have the same dtype."
         )

@@ -182,10 +182,10 @@ def to_csv(
             if isinstance(col, cudf.core.column.CategoricalColumn):
                 df._data[col_name] = col.astype(col.categories.dtype)
 
-        if isinstance(df.index, cudf.CategoricalIndex):
-            df.index = df.index.astype(df.index.categories.dtype)
+    if isinstance(df.index, cudf.CategoricalIndex):
+        df.index = df.index.astype(df.index.categories.dtype)
 
-    rows_per_chunk = chunksize if chunksize else len(df)
+    rows_per_chunk = chunksize or len(df)
 
     if ioutils.is_fsspec_open_file(path_or_buf):
         with path_or_buf as file_obj:

@@ -114,13 +114,12 @@ class CategoricalDtype(_BaseDtype):
     def to_pandas(self) -> pd.CategoricalDtype:
         if self._categories is None:
             categories = None
-        else:
-            if isinstance(
+        elif isinstance(
                 self._categories, (cudf.Float32Index, cudf.Float64Index)
             ):
-                categories = self._categories.dropna().to_pandas()
-            else:
-                categories = self._categories.to_pandas()
+            categories = self._categories.dropna().to_pandas()
+        else:
+            categories = self._categories.to_pandas()
         return pd.CategoricalDtype(categories=categories, ordered=self.ordered)
 
     def _init_categories(self, categories: Any):
@@ -159,8 +158,7 @@ class CategoricalDtype(_BaseDtype):
         raise NotImplementedError()
 
     def serialize(self):
-        header = {}
-        header["type-serialized"] = pickle.dumps(type(self))
+        header = {"type-serialized": pickle.dumps(type(self))}
         header["ordered"] = self.ordered
 
         frames = []
@@ -245,9 +243,7 @@ class ListDtype(_BaseDtype):
         return hash(self._typ)
 
     def serialize(self) -> Tuple[dict, list]:
-        header: Dict[str, Dtype] = {}
-        header["type-serialized"] = pickle.dumps(type(self))
-
+        header: Dict[str, Dtype] = {"type-serialized": pickle.dumps(type(self))}
         frames = []
 
         if isinstance(self.element_type, _BaseDtype):
@@ -320,9 +316,7 @@ class StructDtype(_BaseDtype):
         return hash(self._typ)
 
     def serialize(self) -> Tuple[dict, list]:
-        header: Dict[str, Any] = {}
-        header["type-serialized"] = pickle.dumps(type(self))
-
+        header: Dict[str, Any] = {"type-serialized": pickle.dumps(type(self))}
         frames: List[Buffer] = []
 
         fields = {}
@@ -585,9 +579,8 @@ def is_categorical_dtype(obj):
         ),
     ):
         return is_categorical_dtype(obj.dtype)
-    if hasattr(obj, "type"):
-        if obj.type is pd_CategoricalDtypeType:
-            return True
+    if hasattr(obj, "type") and obj.type is pd_CategoricalDtypeType:
+        return True
     # TODO: A lot of the above checks are probably redundant and should be
     # farmed out to this function here instead.
     return pd_types.is_categorical_dtype(obj)

@@ -139,9 +139,7 @@ class Serializable:
             else (type(f) is memoryview)
             for c, f in zip(header["is-cuda"], frames)
         )
-        obj = typ.deserialize(header, frames)
-
-        return obj
+        return typ.deserialize(header, frames)
 
     def host_serialize(self):
         """Serialize data and metadata associated with host memory.
@@ -187,8 +185,7 @@ class Serializable:
             rmm.DeviceBuffer.to_device(f) if c else f
             for c, f in zip(header["is-cuda"], map(memoryview, frames))
         ]
-        obj = cls.device_deserialize(header, frames)
-        return obj
+        return cls.device_deserialize(header, frames)
 
     def __reduce_ex__(self, protocol):
         header, frames = self.host_serialize()

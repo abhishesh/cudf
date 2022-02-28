@@ -94,10 +94,7 @@ class GroupBy(Serializable, Reducible):
         self._sort = sort
         self._dropna = dropna
 
-        if isinstance(by, _Grouping):
-            self.grouping = by
-        else:
-            self.grouping = _Grouping(obj, by, level)
+        self.grouping = by if isinstance(by, _Grouping) else _Grouping(obj, by, level)
 
     def __iter__(self):
         group_names, offsets, _, grouped_values = self._grouped()
@@ -365,13 +362,14 @@ class GroupBy(Serializable, Reducible):
         return result[sizes > n]
 
     def serialize(self):
-        header = {}
         frames = []
 
-        header["kwargs"] = {
-            "sort": self._sort,
-            "dropna": self._dropna,
-            "as_index": self._as_index,
+        header = {
+            "kwargs": {
+                "sort": self._sort,
+                "dropna": self._dropna,
+                "as_index": self._as_index,
+            }
         }
 
         obj_header, obj_frames = self.obj.serialize()
@@ -432,11 +430,7 @@ class GroupBy(Serializable, Reducible):
 
         # Convert all values to list-like:
         for col, agg in out.items():
-            if not is_list_like(agg):
-                out[col] = [agg]
-            else:
-                out[col] = list(agg)
-
+            out[col] = [agg] if not is_list_like(agg) else list(agg)
         return out
 
     def pipe(self, func, *args, **kwargs):
@@ -921,7 +915,7 @@ class GroupBy(Serializable, Reducible):
             val3  0.714575  1.000000  1.000000
         """
 
-        if not method.lower() in ("pearson",):
+        if method.lower() not in ("pearson",):
             raise NotImplementedError(
                 "Only pearson correlation is currently supported"
             )
@@ -1241,7 +1235,7 @@ class GroupBy(Serializable, Reducible):
             First differences of the Series or DataFrame.
         """
 
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only axis=0 is supported.")
 
         # grouped values
@@ -1361,7 +1355,7 @@ class GroupBy(Serializable, Reducible):
             raise NotImplementedError("Does not support limit param yet.")
         if downcast is not None:
             raise NotImplementedError("Does not support downcast yet.")
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only support axis == 0.")
 
         if value is None and method is None:
@@ -1425,12 +1419,12 @@ class GroupBy(Serializable, Reducible):
         if freq is not None:
             raise NotImplementedError("Parameter freq is unsupported.")
 
-        if not axis == 0:
+        if axis != 0:
             raise NotImplementedError("Only axis=0 is supported.")
 
         value_columns = self.grouping.values
         if is_list_like(fill_value):
-            if not len(fill_value) == len(value_columns._data):
+            if len(fill_value) != len(value_columns._data):
                 raise ValueError(
                     "Mismatched number of columns and values to fill."
                 )
@@ -1617,9 +1611,8 @@ class SeriesGroupBy(GroupBy):
         result = super().agg(func)
 
         # downcast the result to a Series:
-        if len(result._data):
-            if result.shape[1] == 1 and not is_list_like(func):
-                return result.iloc[:, 0]
+        if len(result._data) and result.shape[1] == 1 and not is_list_like(func):
+            return result.iloc[:, 0]
 
         # drop the first level if we have a multiindex
         if result._data.nlevels > 1:
@@ -1772,9 +1765,8 @@ class _Grouping(Serializable):
         self.names.append(None)
 
     def serialize(self):
-        header = {}
         frames = []
-        header["names"] = pickle.dumps(self.names)
+        header = {"names": pickle.dumps(self.names)}
         header["_named_columns"] = pickle.dumps(self._named_columns)
         column_header, column_frames = cudf.core.column.serialize_columns(
             self._key_columns

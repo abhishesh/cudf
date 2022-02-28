@@ -81,14 +81,13 @@ class Buffer(Serializable):
 
     @property
     def __cuda_array_interface__(self) -> dict:
-        intf = {
+        return {
             "data": (self.ptr, False),
             "shape": (self.size,),
             "strides": None,
             "typestr": "|u1",
             "version": 0,
         }
-        return intf
 
     def to_host_array(self):
         data = np.empty((self.size,), "u1")
@@ -118,9 +117,11 @@ class Buffer(Serializable):
             )
 
     def serialize(self) -> Tuple[dict, list]:
-        header = {}  # type: Dict[Any, Any]
-        header["type-serialized"] = pickle.dumps(type(self))
-        header["constructor-kwargs"] = {}
+        header = {
+            "type-serialized": pickle.dumps(type(self)),
+            "constructor-kwargs": {},
+        }
+
         header["desc"] = self.__cuda_array_interface__.copy()
         header["desc"]["strides"] = (1,)
         frames = [self]
@@ -195,7 +196,7 @@ def get_c_contiguity(shape, strides, itemsize):
         if dim == 0:
             return True
 
-    for this_dim, this_stride in zip(shape, strides):
-        if this_stride != this_dim * itemsize:
-            return False
-    return True
+    return all(
+        this_stride == this_dim * itemsize
+        for this_dim, this_stride in zip(shape, strides)
+    )
