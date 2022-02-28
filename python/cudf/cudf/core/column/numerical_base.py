@@ -57,8 +57,7 @@ class NumericalBaseColumn(ColumnBase):
         term_one_section_one = (n * (n + 1)) / ((n - 1) * (n - 2) * (n - 3))
         term_one_section_two = m4_numerator / (V ** 2)
         term_two = ((n - 1) ** 2) / ((n - 2) * (n - 3))
-        kurt = term_one_section_one * term_one_section_two - 3 * term_two
-        return kurt
+        return term_one_section_one * term_one_section_two - 3 * term_two
 
     def skew(self, skipna: bool = None) -> ScalarLike:
         skipna = True if skipna is None else skipna
@@ -80,8 +79,7 @@ class NumericalBaseColumn(ColumnBase):
             return 0
 
         unbiased_coef = ((n * (n - 1)) ** 0.5) / (n - 2)
-        skew = unbiased_coef * m3 / (m2 ** (3 / 2))
-        return skew
+        return unbiased_coef * m3 / (m2 ** (3 / 2))
 
     def quantile(
         self, q: Union[float, Sequence[float]], interpolation: str, exact: bool
@@ -154,8 +152,7 @@ class NumericalBaseColumn(ColumnBase):
             return cudf.utils.dtypes._get_nan_for_dtype(self.dtype)
 
         result = (self - self.mean()) * (other - other.mean())
-        cov_sample = result.sum() / (len(self) - 1)
-        return cov_sample
+        return result.sum() / (len(self) - 1)
 
     def corr(self, other: NumericalBaseColumn) -> float:
         if len(self) == 0 or len(other) == 0:

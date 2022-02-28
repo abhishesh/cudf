@@ -141,9 +141,7 @@ def determine_merge_commit(current_branch="HEAD"):
     print(f"   [DEBUG] Determined TARGET_BRANCH as: '{remote_branch}'. "
           "Finding common ancestor.")
 
-    common_commit = __git("merge-base", remote_branch, current_branch)
-
-    return common_commit
+    return __git("merge-base", remote_branch, current_branch)
 
 
 def uncommittedFiles():
@@ -159,7 +157,7 @@ def uncommittedFiles():
         tmp = f.split(" ", 1)
         # only consider staged files or uncommitted files
         # in other words, ignore untracked files
-        if tmp[0] == "M" or tmp[0] == "A":
+        if tmp[0] in ["M", "A"]:
             ret.append(tmp[1])
     return ret
 
@@ -199,11 +197,7 @@ def changesInFileBetween(file, b1, b2, filter=None):
                       "--",
                       file)
     __git("checkout", "--quiet", current)
-    lines = []
-    for line in diffs.splitlines():
-        if filter is None or filter(line):
-            lines.append(line)
-    return lines
+    return [line for line in diffs.splitlines() if filter is None or filter(line)]
 
 
 def modifiedFiles(pathFilter=None):
@@ -249,11 +243,7 @@ def modifiedFiles(pathFilter=None):
             # Fallback to just uncommitted files
             allFiles = uncommittedFiles()
 
-    files = []
-    for f in allFiles:
-        if pathFilter is None or pathFilter(f):
-            files.append(f)
-
+    files = [f for f in allFiles if pathFilter is None or pathFilter(f)]
     filesToCheckString = "\n\t".join(files) if files else "<None>"
     print(f"   [DEBUG] Found files to check:\n\t{filesToCheckString}\n")
     return files
@@ -263,8 +253,7 @@ def listAllFilesInDir(folder):
     """Utility function to list all files/subdirs in the input folder"""
     allFiles = []
     for root, dirs, files in os.walk(folder):
-        for name in files:
-            allFiles.append(os.path.join(root, name))
+        allFiles.extend(os.path.join(root, name) for name in files)
     return allFiles
 
 
@@ -280,7 +269,5 @@ def listFilesToCheck(filesDirs, filter=None):
                 allFiles.append(f)
         elif os.path.isdir(f):
             files = listAllFilesInDir(f)
-            for f_ in files:
-                if filter is None or filter(f_):
-                    allFiles.append(f_)
+            allFiles.extend(f_ for f_ in files if filter is None or filter(f_))
     return allFiles

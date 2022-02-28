@@ -147,10 +147,7 @@ def run_clang_tidy_command(tidy_cmd):
     result = subprocess.run(cmd, check=False, shell=True,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     status = result.returncode == 0
-    if status:
-        out = ""
-    else:
-        out = "CMD: " + cmd
+    out = "" if status else f"CMD: {cmd}"
     out += result.stdout.decode("utf-8").rstrip()
     return status, out
 
@@ -172,16 +169,12 @@ def run_clang_tidy(cmd, args):
         if not ret:
             status = ret
         tidy_cmd[-2] = "--cuda-host-only"
-        ret, out1 = run_clang_tidy_command(tidy_cmd)
-        if not ret:
-            status = ret
-        out += out1
     else:
         tidy_cmd.append(cmd["file"])
-        ret, out1 = run_clang_tidy_command(tidy_cmd)
-        if not ret:
-            status = ret
-        out += out1
+    ret, out1 = run_clang_tidy_command(tidy_cmd)
+    if not ret:
+        status = ret
+    out += out1
     return status, out, cmd["file"]
 
 

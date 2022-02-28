@@ -86,12 +86,11 @@ class DecimalBaseColumn(NumericalBaseColumn):
             other = other.as_decimal_column(
                 self.dtype.__class__(self.dtype.__class__.MAX_PRECISION, 0)
             )
-        if not isinstance(self.dtype, other.dtype.__class__):
-            if (
-                self.dtype.precision == other.dtype.precision
-                and self.dtype.scale == other.dtype.scale
-            ):
-                other = other.astype(self.dtype)
+        if not isinstance(self.dtype, other.dtype.__class__) and (
+            self.dtype.precision == other.dtype.precision
+            and self.dtype.scale == other.dtype.scale
+        ):
+            other = other.astype(self.dtype)
 
         # Binary Arithmetics between decimal columns. `Scale` and `precision`
         # are computed outside of libcudf
@@ -365,18 +364,14 @@ def _get_decimal_type(lhs_dtype, rhs_dtype, op):
         raise NotImplementedError()
 
     try:
-        if isinstance(lhs_dtype, type(rhs_dtype)):
-            # SCENARIO 1: If `lhs_dtype` & `rhs_dtype` are same, then try to
-            # see if `precision` & `scale` can be fit into this type.
+        if (
+            not isinstance(lhs_dtype, type(rhs_dtype))
+            and lhs_dtype.MAX_PRECISION >= rhs_dtype.MAX_PRECISION
+            or isinstance(lhs_dtype, type(rhs_dtype))
+        ):
             return lhs_dtype.__class__(precision=precision, scale=scale)
         else:
-            # SCENARIO 2: If `lhs_dtype` & `rhs_dtype` are of different dtypes,
-            # then try to see if `precision` & `scale` can be fit into the type
-            # with greater MAX_PRECISION (i.e., the bigger dtype).
-            if lhs_dtype.MAX_PRECISION >= rhs_dtype.MAX_PRECISION:
-                return lhs_dtype.__class__(precision=precision, scale=scale)
-            else:
-                return rhs_dtype.__class__(precision=precision, scale=scale)
+            return rhs_dtype.__class__(precision=precision, scale=scale)
     except ValueError:
         # Call to _validate fails, which means we need
         # to goto SCENARIO 3.

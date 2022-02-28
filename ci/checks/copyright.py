@@ -56,18 +56,13 @@ def checkThisFile(f):
     for exempt in ExemptFiles:
         if exempt.search(f):
             return False
-    for checker in FilesToCheck:
-        if checker.search(f):
-            return True
-    return False
+    return any(checker.search(f) for checker in FilesToCheck)
 
 
 def getCopyrightYears(line):
-    res = CheckSimple.search(line)
-    if res:
+    if res := CheckSimple.search(line):
         return (int(res.group(1)), int(res.group(1)))
-    res = CheckDouble.search(line)
-    if res:
+    if res := CheckDouble.search(line):
         return (int(res.group(1)), int(res.group(2)))
     return (None, None)
 
@@ -138,8 +133,7 @@ def checkCopyright(f, update_current_year):
         errs = []
 
     if update_current_year:
-        errs_update = [x for x in errs if x[-1] is not None]
-        if len(errs_update) > 0:
+        if errs_update := [x for x in errs if x[-1] is not None]:
             print("File: {}. Changing line(s) {}".format(
                 f, ', '.join(str(x[1]) for x in errs if x[-1] is not None)))
             for _, lineNum, __, replacement in errs_update:
@@ -209,12 +203,12 @@ def checkCopyright_main():
     for f in files:
         errors += checkCopyright(f, args.update_current_year)
 
-    if len(errors) > 0:
+    if errors:
         print("Copyright headers incomplete in some of the files!")
         for e in errors:
             print("  %s:%d Issue: %s" % (e[0], e[1], e[2]))
         print("")
-        n_fixable = sum(1 for e in errors if e[-1] is not None)
+        n_fixable = sum(e[-1] is not None for e in errors)
         path_parts = os.path.abspath(__file__).split(os.sep)
         file_from_repo = os.sep.join(path_parts[path_parts.index("ci"):])
         if n_fixable > 0:

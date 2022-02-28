@@ -110,17 +110,9 @@ class Merge:
         # don't have any other args, so we can apply it directly to left_on and
         # right_on.
         self._using_left_index = bool(left_index)
-        left_on = (
-            lhs.index._data.names if left_index else left_on if left_on else on
-        )
+        left_on = lhs.index._data.names if left_index else left_on or on
         self._using_right_index = bool(right_index)
-        right_on = (
-            rhs.index._data.names
-            if right_index
-            else right_on
-            if right_on
-            else on
-        )
+        right_on = rhs.index._data.names if right_index else right_on or on
 
         if left_on or right_on:
             self._left_keys = [
@@ -321,9 +313,12 @@ class Merge:
         # keys, the index will be sorted. If one index is specified,
         # the key columns on the other side will be used to sort.
         by: List[Any] = []
-        if self._using_left_index and self._using_right_index:
-            if result._index is not None:
-                by.extend(result._index._data.columns)
+        if (
+            self._using_left_index
+            and self._using_right_index
+            and result._index is not None
+        ):
+            by.extend(result._index._data.columns)
         if not self._using_left_index:
             by.extend([result._data[col.name] for col in self._left_keys])
         if not self._using_right_index:
@@ -421,8 +416,10 @@ class Merge:
         # If nothing specified, must have common cols to use implicitly
         same_named_columns = set(lhs._data) & set(rhs._data)
         if (
-            not (left_index or right_index)
-            and not (left_on or right_on)
+            not left_index
+            and not right_index
+            and not left_on
+            and not right_on
             and len(same_named_columns) == 0
         ):
             raise ValueError("No common columns to perform merge on")
@@ -436,12 +433,11 @@ class Merge:
                     left_on.index(name) == right_on.index(name)
                 ):
                     continue
-            else:
-                if not (lsuffix or rsuffix):
-                    raise ValueError(
-                        "there are overlapping columns but "
-                        "lsuffix and rsuffix are not defined"
-                    )
+            elif not lsuffix and not rsuffix:
+                raise ValueError(
+                    "there are overlapping columns but "
+                    "lsuffix and rsuffix are not defined"
+                )
 
 
 class MergeSemi(Merge):

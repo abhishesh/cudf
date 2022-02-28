@@ -108,10 +108,7 @@ def list_all_src_files(file_regex, ignore_regex, srcdirs, dstdir, inplace):
                     src = os.path.join(root, f)
                     if re.search(ignore_regex, src):
                         continue
-                    if inplace:
-                        _dir = root
-                    else:
-                        _dir = os.path.join(dstdir, root)
+                    _dir = root if inplace else os.path.join(dstdir, root)
                     dst = os.path.join(_dir, f)
                     allFiles.append((src, dst))
     return allFiles
@@ -122,21 +119,14 @@ def run_clang_format(src, dst, exe, verbose, inplace):
     if not os.path.exists(dstdir):
         os.makedirs(dstdir)
     # run the clang format command itself
-    if src == dst:
-        cmd = f"{exe} -i {src}"
-    else:
-        cmd = f"{exe} {src} > {dst}"
+    cmd = f"{exe} -i {src}" if src == dst else f"{exe} {src} > {dst}"
     try:
         subprocess.check_call(cmd, shell=True)
     except subprocess.CalledProcessError:
         print("Failed to run clang-format! Maybe your env is not proper?")
         raise
     # run the diff to check if there are any formatting issues
-    if inplace:
-        cmd = f"diff -q {src} {dst} >/dev/null"
-    else:
-        cmd = f"diff {src} {dst}"
-
+    cmd = f"diff -q {src} {dst} >/dev/null" if inplace else f"diff {src} {dst}"
     try:
         subprocess.check_call(cmd, shell=True)
         if verbose:

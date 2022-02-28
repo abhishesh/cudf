@@ -230,17 +230,16 @@ class Frame:
     def _mimic_inplace(
         self: T, result: Frame, inplace: bool = False
     ) -> Optional[Frame]:
-        if inplace:
-            for col in self._data:
-                if col in result._data:
-                    self._data[col]._mimic_inplace(
-                        result._data[col], inplace=True
-                    )
-            self._data = result._data
-            self._index = result._index
-            return None
-        else:
+        if not inplace:
             return result
+        for col in self._data:
+            if col in result._data:
+                self._data[col]._mimic_inplace(
+                    result._data[col], inplace=True
+                )
+        self._data = result._data
+        self._index = result._index
+        return None
 
     @property
     def size(self):
@@ -557,9 +556,8 @@ class Frame:
 
         check_types = kwargs.get("check_types", True)
 
-        if check_types:
-            if type(self) is not type(other):
-                return False
+        if check_types and type(self) is not type(other):
+            return False
 
         if other is None or len(self) != len(other):
             return False
@@ -914,15 +912,10 @@ class Frame:
             )
 
         output = self.copy(deep=False)
-        if output.ndim == 1:
-            # In case of series and Index,
-            # swap lower and upper if lower > upper
-            if (
-                lower[0] is not None
-                and upper[0] is not None
-                and (lower[0] > upper[0])
-            ):
-                lower[0], upper[0] = upper[0], lower[0]
+        if output.ndim == 1 and (
+            lower[0] is not None and upper[0] is not None and (lower[0] > upper[0])
+        ):
+            lower[0], upper[0] = upper[0], lower[0]
 
         for i, name in enumerate(self._data):
             output._data[name] = self._data[name].clip(lower[i], upper[i])
@@ -1345,17 +1338,9 @@ class Frame:
         """
         out_cols = []
 
-        if subset is None:
-            df = self
-        else:
-            df = self.take(subset)
-
+        df = self if subset is None else self.take(subset)
         if thresh is None:
-            if how == "all":
-                thresh = 1
-            else:
-                thresh = len(df)
-
+            thresh = 1 if how == "all" else len(df)
         for name, col in df._data.items():
             try:
                 check_col = col.nans_to_nulls()
@@ -1787,7 +1772,6 @@ class Frame:
             )
             result._copy_type_metadata(self)
 
-            return result
         else:
             if len(self.shape) != 2:
                 raise ValueError(
@@ -1847,7 +1831,8 @@ class Frame:
                 if not keep_index:
                     result.index = None
 
-            return result
+
+        return result
 
     @classmethod
     @annotate("FRAME_FROM_ARROW", color="orange", domain="cudf_python")
@@ -1928,8 +1913,9 @@ class Frame:
             # as dictionary size can vary, it can't be a single table
             cudf_dictionaries_columns = {
                 name: ColumnBase.from_arrow(dict_dictionaries[name])
-                for name in dict_dictionaries.keys()
+                for name in dict_dictionaries
             }
+
 
             for name, codes in cudf_indices_frame.items():
                 cudf_category_frame[name] = build_categorical_column(
@@ -2239,7 +2225,7 @@ class Frame:
                 "method parameter is not implemented yet"
             )
 
-        if not (to_replace is None and value is None):
+        if to_replace is not None or value is not None:
             copy_data = {}
             (
                 all_na_per_column,
@@ -2291,25 +2277,24 @@ class Frame:
                 name, col._with_type_metadata(other_col.dtype), validate=False
             )
 
-        if include_index:
-            if self._index is not None and other._index is not None:
-                self._index._copy_type_metadata(other._index)  # type: ignore
-                # When other._index is a CategoricalIndex, the current index
-                # will be a NumericalIndex with an underlying CategoricalColumn
-                # (the above _copy_type_metadata call will have converted the
-                # column). Calling cudf.Index on that column generates the
-                # appropriate index.
-                if isinstance(
-                    other._index, cudf.core.index.CategoricalIndex
-                ) and not isinstance(
-                    self._index, cudf.core.index.CategoricalIndex
-                ):
-                    self._index = cudf.Index(
-                        cast(
-                            cudf.core.index.NumericIndex, self._index
-                        )._column,
-                        name=self._index.name,
-                    )
+        if include_index and self._index is not None and other._index is not None:
+            self._index._copy_type_metadata(other._index)  # type: ignore
+            # When other._index is a CategoricalIndex, the current index
+            # will be a NumericalIndex with an underlying CategoricalColumn
+            # (the above _copy_type_metadata call will have converted the
+            # column). Calling cudf.Index on that column generates the
+            # appropriate index.
+            if isinstance(
+                other._index, cudf.core.index.CategoricalIndex
+            ) and not isinstance(
+                self._index, cudf.core.index.CategoricalIndex
+            ):
+                self._index = cudf.Index(
+                    cast(
+                        cudf.core.index.NumericIndex, self._index
+                    )._column,
+                    name=self._index.name,
+                )
 
         return self
 
@@ -2506,16 +2491,14 @@ class Frame:
         -------
         The interleaved columns as a single column
         """
-        if ("category" == self.dtypes).any():
+        if (self.dtypes == "category").any():
             raise ValueError(
                 "interleave_columns does not support 'category' dtype."
             )
 
-        result = self._constructor_sliced(
+        return self._constructor_sliced(
             libcudf.reshape.interleave_columns(self)
         )
-
-        return result
 
     @annotate("FRAME_TILE", color="green", domain="cudf_python")
     def tile(self, count):
@@ -2611,10 +2594,7 @@ class Frame:
         if na_position not in {"first", "last"}:
             raise ValueError(f"invalid na_position: {na_position}")
 
-        scalar_flag = None
-        if is_scalar(values):
-            scalar_flag = True
-
+        scalar_flag = True if is_scalar(values) else None
         if not isinstance(values, Frame):
             values = as_column(values)
             if values.dtype != self.dtype:
@@ -2627,10 +2607,7 @@ class Frame:
         # Retrun result as cupy array if the values is non-scalar
         # If values is scalar, result is expected to be scalar.
         result = cupy.asarray(outcol.data_array_view)
-        if scalar_flag:
-            return result[0].item()
-        else:
-            return result
+        return result[0].item() if scalar_flag else result
 
     @annotate("FRAME_ARGSORT", color="yellow", domain="cudf_python")
     def argsort(
@@ -3632,7 +3609,7 @@ class Frame:
                 and left_column.null_count == len(left_column)
                 and fill_value is None
             ):
-                if fn in (
+                if fn in {
                     "add",
                     "sub",
                     "mul",
@@ -3640,9 +3617,9 @@ class Frame:
                     "pow",
                     "truediv",
                     "floordiv",
-                ):
+                }:
                     output[col] = left_column
-                elif fn in ("eq", "lt", "le", "gt", "ge"):
+                elif fn in {"eq", "lt", "le", "gt", "ge"}:
                     output[col] = left_column.notnull()
                 elif fn == "ne":
                     output[col] = left_column.isnull()
@@ -3656,7 +3633,7 @@ class Frame:
                 right_column = left_column.normalize_binop_value(right_column)
 
             fn_apply = fn
-            if fn == "truediv":
+            if fn_apply == "truediv":
                 # Decimals in libcudf don't support truediv, see
                 # https://github.com/rapidsai/cudf/pull/7435 for explanation.
                 if is_decimal_dtype(left_column.dtype):
@@ -3679,23 +3656,35 @@ class Frame:
 
             output_mask = None
             if fill_value is not None:
-                if is_scalar(right_column):
-                    if left_column.nullable:
-                        left_column = left_column.fillna(fill_value)
+                if (
+                    is_scalar(right_column)
+                    and left_column.nullable
+                    or not is_scalar(right_column)
+                    and (not left_column.nullable or not right_column.nullable)
+                    and left_column.nullable
+                ):
+                    left_column = left_column.fillna(fill_value)
+                elif (
+                    is_scalar(right_column)
+                    and not left_column.nullable
+                    or not is_scalar(right_column)
+                    and (not left_column.nullable or not right_column.nullable)
+                    and not left_column.nullable
+                    and not right_column.nullable
+                ):
+                    pass
+                elif (
+                    not is_scalar(right_column)
+                    and left_column.nullable
+                    and right_column.nullable
+                ):
+                    lmask = as_column(left_column.nullmask)
+                    rmask = as_column(right_column.nullmask)
+                    output_mask = (lmask | rmask).data
+                    left_column = left_column.fillna(fill_value)
+                    right_column = right_column.fillna(fill_value)
                 else:
-                    # If both columns are nullable, pandas semantics dictate
-                    # that nulls that are present in both left_column and
-                    # right_column are not filled.
-                    if left_column.nullable and right_column.nullable:
-                        lmask = as_column(left_column.nullmask)
-                        rmask = as_column(right_column.nullmask)
-                        output_mask = (lmask | rmask).data
-                        left_column = left_column.fillna(fill_value)
-                        right_column = right_column.fillna(fill_value)
-                    elif left_column.nullable:
-                        left_column = left_column.fillna(fill_value)
-                    elif right_column.nullable:
-                        right_column = right_column.fillna(fill_value)
+                    right_column = right_column.fillna(fill_value)
 
             # For bitwise operations we must verify whether the input column
             # types are valid, and if so, whether we need to coerce the output
@@ -4653,17 +4642,16 @@ class Frame:
                     result_col = col.nans_to_nulls()
                 except AttributeError:
                     result_col = col
+            elif col.has_nulls(include_nan=True):
+                # Workaround as find_first_value doesn't seem to work
+                # incase of bools.
+                first_index = int(
+                    col.isnull().astype("int8").find_first_value(1)
+                )
+                result_col = col.copy()
+                result_col[first_index:] = None
             else:
-                if col.has_nulls(include_nan=True):
-                    # Workaround as find_first_value doesn't seem to work
-                    # incase of bools.
-                    first_index = int(
-                        col.isnull().astype("int8").find_first_value(1)
-                    )
-                    result_col = col.copy()
-                    result_col[first_index:] = None
-                else:
-                    result_col = col
+                result_col = col
 
             if (
                 cast_to_int
@@ -5031,10 +5019,7 @@ class Frame:
         3    1
         4    0
         """
-        if n == 0:
-            return self.iloc[0:0]
-
-        return self.iloc[-n:]
+        return self.iloc[:0] if n == 0 else self.iloc[-n:]
 
     @annotate("FRAME_ROLLING", color="green", domain="cudf_python")
     @copy_docstring(Rolling)
@@ -6798,7 +6783,29 @@ def _get_replacement_values_for_columns(
     elif cudf.api.types.is_list_like(to_replace) or isinstance(
         to_replace, ColumnBase
     ):
-        if is_scalar(value):
+        if (
+            not is_scalar(value)
+            and cudf.api.types.is_list_like(value)
+            and len(to_replace) != len(value)
+        ):
+            raise ValueError(
+                f"Replacement lists must be "
+                f"of same length."
+                f" Expected {len(to_replace)}, got {len(value)}."
+            )
+        elif (
+            not is_scalar(value)
+            and cudf.api.types.is_list_like(value)
+            and len(to_replace) == len(value)
+            or not is_scalar(value)
+            and not cudf.api.types.is_list_like(value)
+            and cudf.utils.dtypes.is_column_like(value)
+        ):
+            to_replace_columns = {
+                col: to_replace for col in columns_dtype_map
+            }
+            values_columns = {col: value for col in columns_dtype_map}
+        elif is_scalar(value):
             to_replace_columns = {col: to_replace for col in columns_dtype_map}
             values_columns = {
                 col: [value]
@@ -6808,21 +6815,6 @@ def _get_replacement_values_for_columns(
                 )
                 for col in columns_dtype_map
             }
-        elif cudf.api.types.is_list_like(value):
-            if len(to_replace) != len(value):
-                raise ValueError(
-                    f"Replacement lists must be "
-                    f"of same length."
-                    f" Expected {len(to_replace)}, got {len(value)}."
-                )
-            else:
-                to_replace_columns = {
-                    col: to_replace for col in columns_dtype_map
-                }
-                values_columns = {col: value for col in columns_dtype_map}
-        elif cudf.utils.dtypes.is_column_like(value):
-            to_replace_columns = {col: to_replace for col in columns_dtype_map}
-            values_columns = {col: value for col in columns_dtype_map}
         else:
             raise TypeError(
                 "value argument must be scalar, list-like or Series"

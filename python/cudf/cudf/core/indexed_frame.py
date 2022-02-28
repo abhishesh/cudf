@@ -87,7 +87,7 @@ def _indices_from_labels(obj, labels):
 
 def _get_label_range_or_mask(index, start, stop, step):
     if (
-        not (start is None and stop is None)
+        (start is not None or stop is not None)
         and type(index) is cudf.core.index.DatetimeIndex
         and index.is_monotonic is False
     ):
@@ -98,12 +98,11 @@ def _get_label_range_or_mask(index, start, stop, step):
                 return slice(0, 0, None)
             # TODO: Once Index binary ops are updated to support logical_and,
             # can use that instead of using cupy.
-            boolean_mask = cp.logical_and((index >= start), (index <= stop))
+            return cp.logical_and((index >= start), (index <= stop))
         elif start is not None:
-            boolean_mask = index >= start
+            return index >= start
         else:
-            boolean_mask = index <= stop
-        return boolean_mask
+            return index <= stop
     else:
         start, stop = index.find_label_range(start, stop)
         return slice(start, stop, step)
@@ -680,7 +679,7 @@ class IndexedFrame(Frame):
         if len(diff) != 0:
             raise KeyError(f"columns {diff} do not exist")
         subset_cols = [name for name in self._column_names if name in subset]
-        if len(subset_cols) == 0:
+        if not subset_cols:
             return self.copy(deep=True)
 
         keys = self._positions_from_column_names(
@@ -858,9 +857,7 @@ class IndexedFrame(Frame):
 
         col = cudf.core.column.as_column(ans_col)
         col.set_base_mask(libcudf.transform.bools_to_mask(ans_mask))
-        result = cudf.Series._from_data({None: col}, self._index)
-
-        return result
+        return cudf.Series._from_data({None: col}, self._index)
 
     def sort_values(
         self,
@@ -952,9 +949,7 @@ class IndexedFrame(Frame):
             return self
 
         if keep == "first":
-            if n < 0:
-                n = 0
-
+            n = max(n, 0)
             # argsort the `by` column
             return self._gather(
                 self._get_columns_by_label(columns)._get_sorted_inds(
@@ -968,11 +963,7 @@ class IndexedFrame(Frame):
                 ascending=largest
             )
 
-            if n <= 0:
-                # Empty slice.
-                indices = indices[0:0]
-            else:
-                indices = indices[: -n - 1 : -1]
+            indices = indices[:0] if n <= 0 else indices[: -n - 1 : -1]
             return self._gather(indices, keep_index=True, check_bounds=False)
         else:
             raise ValueError('keep must be either "first", "last"')
@@ -988,9 +979,10 @@ class IndexedFrame(Frame):
 
         if self.index.equals(index):
             return self
-        if not allow_non_unique:
-            if not self.index.is_unique or not index.is_unique:
-                raise ValueError("Cannot align indices with non-unique values")
+        if not allow_non_unique and (
+            not self.index.is_unique or not index.is_unique
+        ):
+            raise ValueError("Cannot align indices with non-unique values")
 
         lhs = cudf.DataFrame._from_data(self._data, index=self.index)
         rhs = cudf.DataFrame._from_data({}, index=index)
@@ -1004,7 +996,7 @@ class IndexedFrame(Frame):
             rhs[sort_col_id] = cudf.core.column.arange(len(rhs))
 
         result = lhs.join(rhs, how=how, sort=sort)
-        if how in ("left", "right"):
+        if how in {"left", "right"}:
             result = result.sort_values(sort_col_id)
             del result[sort_col_id]
 
@@ -1753,9 +1745,7 @@ class IndexedFrame(Frame):
                     ret = ret.astype(bool)
             return ret
 
-        # Attempt to dispatch all other functions to cupy.
-        cupy_func = getattr(cp, fname)
-        if cupy_func:
+        if cupy_func := getattr(cp, fname):
             if ufunc.nin == 2:
                 other = inputs[self is inputs[0]]
                 inputs, index = self._make_operands_and_index_for_binop(
@@ -1787,8 +1777,9 @@ def _check_duplicate_level_names(specified, level_names):
         return
     duplicates = {key for key, val in Counter(level_names).items() if val > 1}
 
-    duplicates_specified = [spec for spec in specified if spec in duplicates]
-    if not len(duplicates_specified) == 0:
+    if duplicates_specified := [
+        spec for spec in specified if spec in duplicates
+    ]:
         # Note: pandas raises first encountered duplicates, cuDF raises all.
         raise ValueError(
             f"The names {duplicates_specified} occurs multiple times, use a"

@@ -97,8 +97,9 @@ if not os.path.isdir(CUDA_HOME):
 cuda_include_dir = os.path.join(CUDA_HOME, "include")
 cuda_lib_dir = os.path.join(CUDA_HOME, "lib64")
 install_requires.append(
-    "cupy-cuda" + get_cuda_version_from_header(cuda_include_dir)
+    f"cupy-cuda{get_cuda_version_from_header(cuda_include_dir)}"
 )
+
 
 CUDF_HOME = os.environ.get(
     "CUDF_HOME",
@@ -175,8 +176,8 @@ class build_ext_and_proto_no_debug(_build_ext):
                 os.path.getmtime(source) > os.path.getmtime(output)
             ):
                 with open(output, "a") as src:
-                    src.write("# flake8: noqa" + os.linesep)
-                    src.write("# fmt: off" + os.linesep)
+                    src.write(f"# flake8: noqa{os.linesep}")
+                    src.write(f"# fmt: off{os.linesep}")
                 subprocess.check_call([protoc, "--python_out=.", source])
                 with open(output, "r+") as src:
                     new_src_content = (

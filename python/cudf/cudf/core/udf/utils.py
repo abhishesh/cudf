@@ -211,6 +211,4 @@ def _get_kernel(kernel_string, globals_, sig, func):
     globals_["f_"] = f_
     exec(kernel_string, globals_)
     _kernel = globals_["_kernel"]
-    kernel = cuda.jit(sig)(_kernel)
-
-    return kernel
+    return cuda.jit(sig)(_kernel)

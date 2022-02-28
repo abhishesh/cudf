@@ -138,16 +138,14 @@ class _SeriesIlocIndexer(_FrameIndexer):
             )
             and hasattr(value, "dtype")
             and _is_non_decimal_numeric_dtype(value.dtype)
-        ):
-            # normalize types if necessary:
-            if not is_integer(key):
-                to_dtype = np.result_type(
-                    value.dtype, self._frame._column.dtype
-                )
-                value = value.astype(to_dtype)
-                self._frame._column._mimic_inplace(
-                    self._frame._column.astype(to_dtype), inplace=True
-                )
+        ) and not is_integer(key):
+            to_dtype = np.result_type(
+                value.dtype, self._frame._column.dtype
+            )
+            value = value.astype(to_dtype)
+            self._frame._column._mimic_inplace(
+                self._frame._column.astype(to_dtype), inplace=True
+            )
 
         self._frame._column[key] = value
 
@@ -184,15 +182,14 @@ class _SeriesLocIndexer(_FrameIndexer):
             key = self._loc_to_iloc(key)
         except KeyError as e:
             if (
-                is_scalar(key)
-                and not isinstance(self._frame.index, cudf.MultiIndex)
-                and is_scalar(value)
+                not is_scalar(key)
+                or isinstance(self._frame.index, cudf.MultiIndex)
+                or not is_scalar(value)
             ):
-                _append_new_row_inplace(self._frame.index._values, key)
-                _append_new_row_inplace(self._frame._column, value)
-                return
-            else:
                 raise e
+            _append_new_row_inplace(self._frame.index._values, key)
+            _append_new_row_inplace(self._frame._column, value)
+            return
         if isinstance(value, (pd.Series, cudf.Series)):
             value = cudf.Series(value)
             value = value._align_to_index(self._frame.index, how="right")
@@ -232,11 +229,10 @@ class _SeriesLocIndexer(_FrameIndexer):
             arg = cudf.core.series.Series(cudf.core.column.as_column(arg))
             if arg.dtype in (bool, np.bool_):
                 return arg
-            else:
-                indices = _indices_from_labels(self._frame, arg)
-                if indices.null_count > 0:
-                    raise KeyError("label scalar is out of bound")
-                return indices
+            indices = _indices_from_labels(self._frame, arg)
+            if indices.null_count > 0:
+                raise KeyError("label scalar is out of bound")
+            return indices
 
 
 class Series(SingleColumnFrame, IndexedFrame, Serializable):
@@ -438,9 +434,8 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
 
         if not isinstance(data, ColumnBase):
             data = column.as_column(data, nan_as_null=nan_as_null, dtype=dtype)
-        else:
-            if dtype is not None:
-                data = data.astype(dtype)
+        elif dtype is not None:
+            data = data.astype(dtype)
 
         if index is not None and not isinstance(index, BaseIndex):
             index = as_index(index)
@@ -699,11 +694,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
                 "'index' or 'columns'"
             )
 
-        if inplace:
-            out = self
-        else:
-            out = self.copy()
-
+        out = self if inplace else self.copy()
         dropped = _drop_rows_by_labels(out, target, level, errors)
 
         out._data = dropped._data
@@ -1080,10 +1071,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
         return result
 
     def __getitem__(self, arg):
-        if isinstance(arg, slice):
-            return self.iloc[arg]
-        else:
-            return self.loc[arg]
+        return self.iloc[arg] if isinstance(arg, slice) else self.loc[arg]
 
     iteritems = SingleColumnFrame.__iter__
 
@@ -1150,14 +1138,15 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
                     )
                 )
             else:
-                if is_categorical_dtype(self):
-                    if is_interval_dtype(
-                        self.dtype.categories
-                    ) and is_struct_dtype(preprocess._column.categories):
-                        # with a series input the IntervalIndex's are turn
-                        # into a struct dtype this line will change the
-                        # categories back to an intervalIndex.
-                        preprocess.dtype._categories = self.dtype.categories
+                if (
+                    is_categorical_dtype(self)
+                    and is_interval_dtype(self.dtype.categories)
+                    and is_struct_dtype(preprocess._column.categories)
+                ):
+                    # with a series input the IntervalIndex's are turn
+                    # into a struct dtype this line will change the
+                    # categories back to an intervalIndex.
+                    preprocess.dtype._categories = self.dtype.categories
                 pd_series = preprocess.to_pandas()
             output = pd_series.to_string(
                 name=self.name,
@@ -1190,11 +1179,11 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
                 lines.append("Name: %s" % str(self.name))
                 if len(self) > len(preprocess):
                     lines[-1] = lines[-1] + ", Length: %d" % len(self)
-                lines[-1] = lines[-1] + ", "
+                lines[-1] = f'{lines[-1]}, '
             elif lines[-1].startswith("Length: "):
                 lines = lines[:-1]
                 lines.append("Length: %d" % len(self))
-                lines[-1] = lines[-1] + ", "
+                lines[-1] = f'{lines[-1]}, '
             else:
                 lines = lines[:-1]
                 lines[-1] = lines[-1] + "\n"
@@ -1325,18 +1314,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
                 ):
                     continue
 
-                if (
-                    not dtype_mismatch
-                    and (
-                        not isinstance(
-                            objs[0]._column, cudf.core.column.CategoricalColumn
-                        )
-                        and not isinstance(
-                            obj._column, cudf.core.column.CategoricalColumn
-                        )
-                    )
-                    and objs[0].dtype != obj.dtype
-                ):
+                if not dtype_mismatch and objs[0].dtype != obj.dtype:
                     dtype_mismatch = True
 
                 if is_mixed_with_object_dtype(objs[0], obj):
@@ -1792,8 +1770,6 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
 
                 tb = traceback.format_exc()
                 warnings.warn(tb)
-            elif errors == "ignore":
-                pass
             return self
 
     def sort_index(self, axis=0, *args, **kwargs):
@@ -3281,7 +3257,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
         else:
             lsuffix, rsuffix = suffixes
 
-        result = super()._merge(
+        return super()._merge(
             other,
             on=on,
             left_on=left_on,
@@ -3293,8 +3269,6 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
             indicator=False,
             suffixes=suffixes,
         )
-
-        return result
 
     def add_prefix(self, prefix):
         return Series._from_data(
@@ -3428,8 +3402,7 @@ class Series(SingleColumnFrame, IndexedFrame, Serializable):
 
         data = self.fillna(method=fill_method, limit=limit)
         diff = data.diff(periods=periods)
-        change = diff / data.shift(periods=periods, freq=freq)
-        return change
+        return diff / data.shift(periods=periods, freq=freq)
 
 
 def make_binop_func(op):
@@ -4691,21 +4664,9 @@ def _align_indices(series_list, how="outer", allow_non_unique=False):
     # check if all indices are the same
     head = series_list[0].index
 
-    all_index_equal = True
-    for sr in series_list[1:]:
-        if not sr.index.equals(head):
-            all_index_equal = False
-            break
-
-    # check if all names are the same
-    all_names_equal = True
-    for sr in series_list[1:]:
-        if not sr.index.names == head.names:
-            all_names_equal = False
-    new_index_names = [None] * head.nlevels
-    if all_names_equal:
-        new_index_names = head.names
-
+    all_index_equal = all(sr.index.equals(head) for sr in series_list[1:])
+    all_names_equal = all(sr.index.names == head.names for sr in series_list[1:])
+    new_index_names = head.names if all_names_equal else [None] * head.nlevels
     if all_index_equal:
         return series_list
 
@@ -4713,7 +4674,6 @@ def _align_indices(series_list, how="outer", allow_non_unique=False):
         combined_index = cudf.core.reshape.concat(
             [sr.index for sr in series_list]
         ).unique()
-        combined_index.names = new_index_names
     else:
         combined_index = series_list[0].index
         for sr in series_list[1:]:
@@ -4724,17 +4684,13 @@ def _align_indices(series_list, how="outer", allow_non_unique=False):
                     how="inner",
                 )
             ).index
-        combined_index.names = new_index_names
-
-    # align all Series to the combined index
-    result = [
+    combined_index.names = new_index_names
+    return [
         sr._align_to_index(
             combined_index, how=how, allow_non_unique=allow_non_unique
         )
         for sr in series_list
     ]
-
-    return result
 
 
 def isclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):

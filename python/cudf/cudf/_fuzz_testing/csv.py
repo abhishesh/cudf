@@ -73,7 +73,7 @@ class CSVReader(IOFuzz):
 
     def write_data(self, file_name):
         if self._current_buffer is not None:
-            self._current_buffer.to_csv(file_name + "_crash.csv")
+            self._current_buffer.to_csv(f'{file_name}_crash.csv')
 
     def set_rand_params(self, params):
         params_dict = {}
@@ -178,7 +178,7 @@ class CSVWriter(IOFuzz):
 
     def write_data(self, file_name):
         if self._current_buffer is not None:
-            self._current_buffer.to_csv(file_name + "_crash.csv")
+            self._current_buffer.to_csv(f'{file_name}_crash.csv')
 
     def set_rand_params(self, params):
         params_dict = {}

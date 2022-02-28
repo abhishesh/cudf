@@ -118,11 +118,7 @@ def test_series_binop_scalar(nelem, binop, obj_class, use_cudf_scalar):
     if obj_class == "Index":
         sr = as_index(sr)
 
-    if use_cudf_scalar:
-        result = binop(sr, rhs)
-    else:
-        result = binop(sr, cudf.Scalar(rhs))
-
+    result = binop(sr, rhs) if use_cudf_scalar else binop(sr, cudf.Scalar(rhs))
     if obj_class == "Index":
         result = Series(result)
 
@@ -893,7 +889,7 @@ def test_logical_operator_func_dataframe(func, nulls, other):
 @pytest.mark.parametrize("rhs", [0, 1, 2, 128])
 def test_binop_bool_uint(func, rhs):
     # TODO: remove this once issue #2172 is resolved
-    if func == "rmod" or func == "rfloordiv":
+    if func in ["rmod", "rfloordiv"]:
         return
     psr = pd.Series([True, False, False])
     gsr = cudf.from_pandas(psr)
@@ -964,16 +960,8 @@ def test_vector_to_none_binops(dtype):
 def test_ufunc_ops(lhs, rhs, ops):
     np_op, cu_op = ops
 
-    if isinstance(lhs, pd.Series):
-        culhs = cudf.from_pandas(lhs)
-    else:
-        culhs = lhs
-
-    if isinstance(rhs, pd.Series):
-        curhs = cudf.from_pandas(rhs)
-    else:
-        curhs = rhs
-
+    culhs = cudf.from_pandas(lhs) if isinstance(lhs, pd.Series) else lhs
+    curhs = cudf.from_pandas(rhs) if isinstance(rhs, pd.Series) else rhs
     expect = np_op(lhs, rhs)
     with _hide_deprecated_ops_warnings(cu_op, culhs, curhs):
         got = cu_op(culhs, curhs)
@@ -990,11 +978,10 @@ def dtype_scalar(val, dtype):
     if dtype == "str":
         return str(val)
     dtype = cudf.dtype(dtype)
-    if dtype.type in {np.datetime64, np.timedelta64}:
-        res, _ = np.datetime_data(dtype)
-        return dtype.type(val, res)
-    else:
+    if dtype.type not in {np.datetime64, np.timedelta64}:
         return dtype.type(val)
+    res, _ = np.datetime_data(dtype)
+    return dtype.type(val, res)
 
 
 def make_valid_scalar_add_data():
@@ -1752,9 +1739,7 @@ def test_binops_with_lhs_numpy_scalar(frame, dtype):
         else frame(data, dtype=dtype)
     )
 
-    if dtype == "datetime64[s]":
-        val = cudf.dtype(dtype).type(4, "s")
-    elif dtype == "timedelta64[s]":
+    if dtype in ["datetime64[s]", "timedelta64[s]"]:
         val = cudf.dtype(dtype).type(4, "s")
     elif dtype == "category":
         val = np.int64(4)
@@ -1801,10 +1786,7 @@ def test_binops_with_NA_consistent(dtype, op):
 
     result = getattr(sr, op)(cudf.NA)
     if dtype in NUMERIC_TYPES:
-        if op == "ne":
-            expect_all = True
-        else:
-            expect_all = False
+        expect_all = op == "ne"
         assert (result == expect_all).all()
     elif dtype in DATETIME_TYPES & TIMEDELTA_TYPES:
         assert result._column.null_count == len(data)

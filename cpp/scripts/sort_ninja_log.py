@@ -51,14 +51,13 @@ with open(log_file) as log:
             if end < last:
                 files = {}
             last = end
-            files.setdefault(entry[4], (entry[3], start, end, file_size))
-
+            files.setdefault(entry[4], (entry[3], start, last, file_size))
     # build entries from files dict
     for entry in files.values():
         entries[entry[0]] = (entry[1], entry[2], entry[3])
 
 # check file could be loaded and we have entries to report
-if len(entries) == 0:
+if not entries:
     print("Could not parse", log_file)
     exit()
 
@@ -203,7 +202,7 @@ def output_html(entries, sorted_list, args):
 
             # format the build-time
             build_time = end - start
-            build_time_str = str(build_time) + " ms"
+            build_time_str = f'{str(build_time)} ms'
             if build_time > 120000:  # 2 minutes
                 minutes = int(build_time / 60000)
                 seconds = int(((build_time / 60000) - minutes) * 60)
@@ -277,7 +276,7 @@ def output_html(entries, sorted_list, args):
         elif file_size > 1000:
             file_size_str = "{:.3f} KB".format(file_size / 1000)
         elif file_size > 0:
-            file_size_str = str(file_size) + " bytes"
+            file_size_str = f'{str(file_size)} bytes'
 
         # output entry row
         print("<tr ", color, "><td>", name, "</td>", sep="", end="")
